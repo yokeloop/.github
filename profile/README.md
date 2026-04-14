@@ -44,8 +44,8 @@ Browse our repositories → see what's shipping.
 
 Found something useful? Have a problem that feels like it needs an agent? We're easy to reach.
 
-→ [t.me/mrbzzz](https://t.me/mrbzzz)
-→ [t.me/doninpr](https://t.me/doninpr)
+- [t.me/mrbzzz](https://t.me/mrbzzz)
+- [t.me/doninpr](https://t.me/doninpr)
 ---
 
 <div align="center">
