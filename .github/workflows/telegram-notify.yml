@@ -1,0 +1,111 @@
+# Reusable workflow: sends a Telegram notification about a repository event.
+#
+# Каждый репозиторий орги вызывает его крошечным caller-файлом
+# (.github/workflows/telegram-notify.yml) с `secrets: inherit`. Логика и формат
+# сообщения живут ТОЛЬКО здесь — правишь в одном месте, эффект во всех репо.
+#
+# Требуются org-level secrets (видимость — все репозитории):
+#   TELEGRAM_TOKEN — токен бота от @BotFather
+#   TELEGRAM_TO    — chat id получателя (узнать у @userinfobot или getUpdates)
+#
+# Контекст события (github.*) приходит от ИСХОДНОГО события вызывающего репо,
+# поэтому здесь доступны и push, и pull_request, и issues, и release.
+
+name: telegram-notify
+
+on:
+  workflow_call:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compose message
+        id: msg
+        # Динамика прокидывается через env, а не интерполируется в скрипт —
+        # иначе заголовок коммита/PR может сломать шелл (script injection).
+        env:
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          REF: ${{ github.ref_name }}
+          COMPARE: ${{ github.event.compare }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          ISSUE_ACTION: ${{ github.event.action }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+        run: |
+          set -euo pipefail
+          esc() { printf '%s' "${1:-}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+          repo=$(esc "$REPO")
+          actor=$(esc "$ACTOR")
+
+          case "$EVENT" in
+            push)
+              text="🚀 <b>${repo}</b> · push to <code>$(esc "$REF")</code>
+              👤 ${actor}
+              📝 $(esc "$COMMIT_MSG")
+              🔗 <a href=\"${COMPARE}\">changes</a>"
+              ;;
+            pull_request)
+              case "$PR_ACTION" in
+                opened)   verb="🟢 PR opened" ;;
+                reopened) verb="🔁 PR reopened" ;;
+                closed)
+                  if [ "$PR_MERGED" = "true" ]; then verb="🟣 PR merged"; else verb="⚪ PR closed"; fi ;;
+                *) verb="PR ${PR_ACTION}" ;;
+              esac
+              text="${verb} · <b>${repo}</b> #${PR_NUMBER}
+              👤 ${actor}
+              📌 $(esc "$PR_TITLE")
+              🔗 <a href=\"${PR_URL}\">open PR</a>"
+              ;;
+            issues)
+              case "$ISSUE_ACTION" in
+                opened) verb="🐛 Issue opened" ;;
+                closed) verb="✅ Issue closed" ;;
+                *) verb="Issue ${ISSUE_ACTION}" ;;
+              esac
+              text="${verb} · <b>${repo}</b> #${ISSUE_NUMBER}
+              👤 ${actor}
+              📌 $(esc "$ISSUE_TITLE")
+              🔗 <a href=\"${ISSUE_URL}\">open issue</a>"
+              ;;
+            release)
+              text="📦 Release · <b>${repo}</b>
+              🏷 <code>$(esc "$RELEASE_TAG")</code> $(esc "$RELEASE_NAME")
+              👤 ${actor}
+              🔗 <a href=\"${RELEASE_URL}\">release notes</a>"
+              ;;
+            *)
+              text="ℹ️ <b>${repo}</b> · event <code>$(esc "$EVENT")</code> by ${actor}"
+              ;;
+          esac
+
+          # Убираем ведущие отступы от YAML-блока, сохраняя переводы строк.
+          text=$(printf '%s\n' "$text" | sed 's/^[[:space:]]*//')
+
+          {
+            echo "text<<TELEGRAM_EOF"
+            printf '%s\n' "$text"
+            echo "TELEGRAM_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send Telegram message
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          format: html
+          disable_web_page_preview: true
+          message: ${{ steps.msg.outputs.text }}
