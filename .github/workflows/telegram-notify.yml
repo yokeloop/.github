@@ -103,16 +103,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Send Telegram message
-        # Голый Bot API вместо appleboy/telegram-action: тот не умеет топики
-        # форума (message_thread_id), а зависимость от чужого action не нужна.
-        env:
-          TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TO: ${{ secrets.TELEGRAM_TO }}
-          TOPIC: ${{ secrets.TELEGRAM_TOPIC }}
-          TEXT: ${{ steps.msg.outputs.text }}
-        run: |
-          set -euo pipefail
-          args=(-d "chat_id=${TO}" -d parse_mode=HTML -d disable_web_page_preview=true --data-urlencode "text=${TEXT}")
-          [ -n "${TOPIC:-}" ] && args+=(-d "message_thread_id=${TOPIC}")
-          resp=$(curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" "${args[@]}")
-          echo "$resp" | grep -q '"ok":true' || { echo "$resp" >&2; exit 1; }
+        uses: appleboy/telegram-action@v1
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message_thread_id: ${{ secrets.TELEGRAM_TOPIC }}
+          format: html
+          disable_web_page_preview: true
+          message: ${{ steps.msg.outputs.text }}
