@@ -6,7 +6,8 @@
 #
 # Требуются org-level secrets (видимость — все репозитории):
 #   TELEGRAM_TOKEN — токен бота от @BotFather
-#   TELEGRAM_TO    — chat id получателя (узнать у @userinfobot или getUpdates)
+#   TELEGRAM_TO    — chat id получателя (для супергруппы — вида -100…)
+#   TELEGRAM_TOPIC — message_thread_id топика форума (опционально; пусто = в общий чат)
 #
 # Контекст события (github.*) приходит от ИСХОДНОГО события вызывающего репо,
 # поэтому здесь доступны и push, и pull_request, и issues, и release.
@@ -102,10 +103,16 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Send Telegram message
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_TO }}
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          format: html
-          disable_web_page_preview: true
-          message: ${{ steps.msg.outputs.text }}
+        # Голый Bot API вместо appleboy/telegram-action: тот не умеет топики
+        # форума (message_thread_id), а зависимость от чужого action не нужна.
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TO: ${{ secrets.TELEGRAM_TO }}
+          TOPIC: ${{ secrets.TELEGRAM_TOPIC }}
+          TEXT: ${{ steps.msg.outputs.text }}
+        run: |
+          set -euo pipefail
+          args=(-d "chat_id=${TO}" -d parse_mode=HTML -d disable_web_page_preview=true --data-urlencode "text=${TEXT}")
+          [ -n "${TOPIC:-}" ] && args+=(-d "message_thread_id=${TOPIC}")
+          resp=$(curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" "${args[@]}")
+          echo "$resp" | grep -q '"ok":true' || { echo "$resp" >&2; exit 1; }
