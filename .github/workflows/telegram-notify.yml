@@ -46,7 +46,11 @@ jobs:
           RELEASE_URL: ${{ github.event.release.html_url }}
         run: |
           set -euo pipefail
-          esc() { printf '%s' "${1:-}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+          # appleboy/telegram-action (drone-telegram) runs html.UnescapeString on the
+          # message before sending, so a single &lt; arrives at Telegram as a bare <
+          # and breaks the HTML parser on titles like «review-<repo>.json». Escape
+          # twice: &amp;lt; → &lt; after the action's unescape → «<» on screen.
+          esc() { printf '%s' "${1:-}" | sed -e 's/&/\&amp;amp;/g' -e 's/</\&amp;lt;/g' -e 's/>/\&amp;gt;/g'; }
 
           repo=$(esc "$REPO")
           actor=$(esc "$ACTOR")
