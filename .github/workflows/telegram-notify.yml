@@ -4,6 +4,10 @@
 # (.github/workflows/telegram-notify.yml) с `secrets: inherit`. Логика и формат
 # сообщения живут ТОЛЬКО здесь — правишь в одном месте, эффект во всех репо.
 #
+# Вызывающий файл из репозитория вне организации (форк под личным аккаунтом)
+# секретов через `inherit` не получает и передаёт их явно — поэтому три секрета
+# объявлены под `workflow_call.secrets`.
+#
 # Требуются org-level secrets (видимость — все репозитории):
 #   TELEGRAM_TOKEN — токен бота от @BotFather
 #   TELEGRAM_TO    — chat id получателя (для супергруппы — вида -100…)
@@ -16,6 +20,13 @@ name: telegram-notify
 
 on:
   workflow_call:
+    secrets:
+      TELEGRAM_TOKEN:
+        required: false
+      TELEGRAM_TO:
+        required: false
+      TELEGRAM_TOPIC:
+        required: false
 
 jobs:
   notify:
