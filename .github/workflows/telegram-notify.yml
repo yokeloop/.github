@@ -13,4 +13,5 @@ on:
 jobs:
   notify:
     uses: yokeloop/.github/.github/workflows/mattermost-notify.yml@main
-    secrets: inherit
+    secrets:
+      MATTERMOST_GITHUB_WEBHOOK: ${{ secrets.MATTERMOST_GITHUB_WEBHOOK }}
