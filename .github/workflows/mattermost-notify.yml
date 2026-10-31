@@ -1,0 +1,105 @@
+# Reusable workflow: posts a Mattermost notification (#github) about a repository event.
+#
+# Каждый репозиторий орги вызывает его через caller-файл telegram-notify.yml
+# (имя осталось от Telegram, внутри — тонкая прослойка к этому файлу) с
+# `secrets: inherit`. Логика и формат сообщения живут ТОЛЬКО здесь.
+#
+# Требуется org-level secret (видимость — все репозитории):
+#   MATTERMOST_GITHUB_WEBHOOK — URL входящего вебхука канала #github на mm.yokeloop.com
+#
+# Секрет не проставлен — отправка пропускается, джоба зелёная.
+
+name: mattermost-notify
+
+on:
+  workflow_call:
+    secrets:
+      MATTERMOST_GITHUB_WEBHOOK:
+        required: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Mattermost
+        # Динамика прокидывается через env, а не интерполируется в скрипт —
+        # иначе заголовок коммита/PR может сломать шелл (script injection).
+        env:
+          WEBHOOK: ${{ secrets.MATTERMOST_GITHUB_WEBHOOK }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          REF: ${{ github.ref_name }}
+          COMPARE: ${{ github.event.compare }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          ACTION: ${{ github.event.action }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "::notice::MATTERMOST_GITHUB_WEBHOOK is empty — notification skipped"
+            exit 0
+          fi
+
+          # Первая строка заголовка коммита; Markdown-символы экранируем.
+          esc() { printf '%s' "${1:-}" | head -n1 | sed -e 's/[][\\`*_<>#|]/\\&/g'; }
+
+          repo_link="[${REPO}](${SERVER}/${REPO})"
+
+          case "$EVENT" in
+            push)
+              text="🚀 **${repo_link}** · push в \`${REF}\`
+          👤 ${ACTOR}
+          📝 $(esc "$COMMIT_MSG")
+          🔗 [изменения](${COMPARE})"
+              ;;
+            pull_request)
+              case "$ACTION" in
+                opened)   verb="🟢 PR открыт" ;;
+                reopened) verb="🔁 PR открыт снова" ;;
+                closed)
+                  if [ "$PR_MERGED" = "true" ]; then verb="🟣 PR слит"; else verb="⚪ PR закрыт"; fi ;;
+                *) verb="PR ${ACTION}" ;;
+              esac
+              text="${verb} · **${repo_link}** #${PR_NUMBER}
+          👤 ${ACTOR}
+          📌 $(esc "$PR_TITLE")
+          🔗 [открыть PR](${PR_URL})"
+              ;;
+            issues)
+              case "$ACTION" in
+                opened) verb="🐛 Задача открыта" ;;
+                closed) verb="✅ Задача закрыта" ;;
+                *) verb="Задача ${ACTION}" ;;
+              esac
+              text="${verb} · **${repo_link}** #${ISSUE_NUMBER}
+          👤 ${ACTOR}
+          📌 $(esc "$ISSUE_TITLE")
+          🔗 [открыть задачу](${ISSUE_URL})"
+              ;;
+            release)
+              text="📦 Релиз · **${repo_link}**
+          🏷 \`${RELEASE_TAG}\` $(esc "$RELEASE_NAME")
+          👤 ${ACTOR}
+          🔗 [описание релиза](${RELEASE_URL})"
+              ;;
+            *)
+              text="ℹ️ **${repo_link}** · событие \`${EVENT}\` от ${ACTOR}"
+              ;;
+          esac
+
+          # Убираем ведущие отступы от YAML-блока.
+          text=$(printf '%s\n' "$text" | sed 's/^[[:space:]]*//')
+
+          jq -n --arg text "$text" --arg username "GitHub" '{text: $text, username: $username}' \
+            | curl -fsS --retry 3 -H 'Content-Type: application/json' -d @- "$WEBHOOK"
